@@ -3,6 +3,7 @@
 
 import mmap
 import os
+from os import PathLike
 from pathlib import Path
 
 import polars as pl
@@ -23,6 +24,12 @@ def num_samples(source: str | Path | bytes, *, verify: bool = False) -> int:
 def bytes_from_archive(archive: Path | str, offset: int, file_size: int) -> bytes:
     with Path(archive).open("rb") as path, mmap.mmap(path.fileno(), length=0, access=mmap.ACCESS_READ) as mmap_o:
         return mmap_o[offset : offset + file_size]
+
+
+def read_alignments(alignments_path: PathLike) -> dict[str, list[str]]:
+    alignments = pl.read_csv(alignments_path)
+    assert "language" in alignments.columns, "Need language column in alignments to identify phoneme tokenizer."
+    return {row["fileid"]: (row["phones"], row["language"]) for row in alignments.iter_rows(named=True)}
 
 
 def read_manifest(path: Path | str) -> pl.DataFrame:

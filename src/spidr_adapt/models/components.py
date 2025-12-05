@@ -2,6 +2,7 @@
 """Model components for DinoSR and SpidR."""
 
 import math
+from typing import NamedTuple
 
 import torch
 from torch import Tensor, nn
@@ -75,6 +76,34 @@ class FeatureProjection(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         x = self.layer_norm(x)
         return self.projection(x)
+
+
+class SupervisedClassifier(nn.Module):
+    """Layer that follows attention layer in encoder layer."""
+
+    def __init__(self, embed_dim: int, output_dim: int, num_layers: int) -> None:
+        super().__init__()
+        self.layers = nn.ModuleList()
+        for _ in range(num_layers - 1):
+            self.layers.append(torch.nn.Linear(embed_dim, embed_dim))
+        self.output_layer = torch.nn.Linear(embed_dim, output_dim)
+
+    def forward(self, x: Tensor) -> Tensor:
+        for layer in self.layers:
+            x = layer(x)
+            x = F.gelu(x)
+        return self.output_layer(x)
+
+
+def get_frame_level_cross_entropy_loss(logits: Tensor, targets: Tensor, ignore_index: int) -> Tensor:
+    assert logits.ndim == 3  # noqa: PLR2004
+    assert targets.ndim == 2  # noqa: PLR2004
+    return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.flatten(), ignore_index=ignore_index)
+
+
+class LossWeightDefinition(NamedTuple):
+    ssl: float = 1.0
+    supervised: float = 0.0
 
 
 class ConvPositionalEmbedding(nn.Module):

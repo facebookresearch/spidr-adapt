@@ -17,9 +17,9 @@ from tqdm import tqdm
 
 from spidr_adapt.checkpoint import Checkpointer, remove_param_group
 from spidr_adapt.config import Config, ResumeConfig, read_config
-from spidr_adapt.data import build_dataloader
+from spidr_adapt.data import BatchType, InterleaveSLDatasetLoader
 from spidr_adapt.environment import setup_training
-from spidr_adapt.models import build_model
+from spidr_adapt.models import LossWeightDefinition, build_model
 from spidr_adapt.optimizer import build_optimizer
 from spidr_adapt.slurm import launch_with_submitit, validation_job_config
 from spidr_adapt.tools import AverageMeters, profiler_context
@@ -64,6 +64,20 @@ def launch_validation(cfg: Config, resume: ResumeConfig) -> None:
     )
 
 
+def get_loss_weights_and_batch_type(
+    step: int,
+    supervised_every_step: int,
+) -> tuple[LossWeightDefinition, BatchType]:
+    """Determine the loss weights and data type based on the current step."""
+    if supervised_every_step and step % supervised_every_step == 0:
+        loss_weights = LossWeightDefinition(ssl=0.0, supervised=1.0)
+        batch_type = BatchType.SUPERVISED
+    else:
+        loss_weights = LossWeightDefinition(ssl=1.0, supervised=0.0)
+        batch_type = BatchType.SSL
+    return loss_weights, batch_type
+
+
 def train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
     with ExitStack() as stack:
         logger.info("Starting job")
@@ -81,13 +95,13 @@ def train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
         model = build_model(cfg=cfg.model, model_type=cfg.run.model_type, checkpoint=cfg.run.init_ckpt)
         model = model.to(device).train()
         optimizer, scaler, scheduler = build_optimizer(model, cfg.optimizer)
-        loader = build_dataloader(cfg.data, cfg.masking, conv_layer_config=cfg.model.extractor_conv_layer_config)
         dist.barrier(device_ids=[device.index])
         ckpt = Checkpointer(cfg.run.dir, cfg.run.save_interval, cfg.run.keep_latest)
         ckpt.init_state(model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler)
         resuming = ckpt.load_existing_run()
-        step, epoch = int(ckpt.step), int(ckpt.epoch)
-        if not resuming and is_main and ckpt.save(step, epoch):
+        step, epoch, supervised_epoch = int(ckpt.step), int(ckpt.epoch), int(ckpt.supervised_epoch)
+        loader = InterleaveSLDatasetLoader(cfg, epoch, supervised_epoch=supervised_epoch)
+        if not resuming and is_main and ckpt.save(step, epoch, supervised_epoch=supervised_epoch):
             launch_validation(cfg, ResumeConfig(step=step, checkpoint=ckpt.last, results=ckpt.metrics))
         if cfg.run.compile:
             model.compile(dynamic=True)
@@ -95,53 +109,57 @@ def train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
         ddp_model = DistributedDataParallel(model, device_ids=[device.index], find_unused_parameters=True)
 
         logger.info("Starting training loop")
-        meters = AverageMeters(["loss", "grad_norm", "batch_size", "target_ppl", "pred_ppl"], device=device)
+        meters = AverageMeters(
+            ["loss", "supervised_loss", "ssl_loss", "grad_norm", "batch_size", "target_ppl", "pred_ppl"], device=device
+        )
         profiler = stack.enter_context(profiler_context(cfg.run.dir / "trace.html" if is_main else None))
         pbar = stack.enter_context(tqdm(total=cfg.optimizer.max_steps, initial=step, disable=not is_main))
         while step < cfg.optimizer.max_steps:
-            epoch += 1
-            loader.batch_sampler.set_epoch(epoch)
-            logger.info("Starting epoch %s", epoch)
-            for waveforms, attn_mask, mask in loader:
-                if step >= cfg.optimizer.max_steps:
-                    break
-                if step == cfg.model.freeze_step and len(optimizer.param_groups) > 1:
-                    remove_param_group(optimizer, 1)
+            loss_weights, batch_type = get_loss_weights_and_batch_type(step, cfg.model.supervised_every_step)
+            batch = loader.load_batch_data(batch_type)
+            if step >= cfg.optimizer.max_steps:
+                break
+            if step == cfg.model.freeze_step and len(optimizer.param_groups) > 1:
+                remove_param_group(optimizer, 1)
 
-                with torch.autocast("cuda", dtype, cfg.optimizer.mixed_precision):
-                    loss, outputs = ddp_model(
-                        waveforms.to(device),
-                        mask=mask.to(device),
-                        attention_mask=attn_mask.to(device),
-                    )
-                num_frames = torch.tensor(loss.size(0), dtype=torch.long, device=device)
-                dist.all_reduce(num_frames)
-                loss = loss.sum() * world_size / num_frames
-                scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                grad_norm = clip_grad_norm_(ddp_model.parameters(), cfg.optimizer.max_norm)
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad(set_to_none=True)
-                lr = scheduler.get_last_lr()[0]
-                scheduler.step()
-                step += 1
-                ema_decay = model.update_ema(step)
+            with torch.autocast("cuda", dtype, cfg.optimizer.mixed_precision):
+                ssl_loss, supervised_loss, outputs = ddp_model(batch.to(device), loss_weights=loss_weights)
+            num_frames = torch.tensor(ssl_loss.size(0), dtype=torch.long, device=device)
+            dist.all_reduce(num_frames)
+            ssl_loss = ssl_loss.sum() * world_size / num_frames
+            loss = loss_weights.supervised * supervised_loss + loss_weights.ssl * ssl_loss
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            grad_norm = clip_grad_norm_(ddp_model.parameters(), cfg.optimizer.max_norm)
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
+            lr = scheduler.get_last_lr()[0]
+            scheduler.step()
+            step += 1
+            ema_decay = model.update_ema(step)
 
-                meters.update(loss=loss.detach(), batch_size=waveforms.size(0), grad_norm=grad_norm)
-                meters.update(target_ppl=outputs["target_ppl"], pred_ppl=outputs["pred_ppl"])
-                pbar.update()
-                if is_main and step % cfg.run.log_interval == 0:
-                    infos = meters.pop() | {"lr": lr, "ema_decay": ema_decay * 1000, "step": step, "epoch": epoch}
-                    wandb.log({f"train/{key}": value for key, value in infos.items()})
-                    pbar.set_postfix(loss=infos["loss"], target_ppl=infos["target_ppl"], pred_ppl=infos["pred_ppl"])
-                if is_main and ckpt.save(step, epoch):
-                    launch_validation(cfg, ResumeConfig(step=step, checkpoint=ckpt.last, results=ckpt.metrics))
-                    for val_metric in ckpt.find_new_metrics():
-                        wandb.log(val_metric)
-                profiler.step()
+            meters.update(loss=loss.detach(), supervised_loss=supervised_loss.detach(), ssl_loss=ssl_loss.detach())
+            meters.update(batch_size=batch.waveforms.size(0), grad_norm=grad_norm)
+            meters.update(target_ppl=outputs["target_ppl"], pred_ppl=outputs["pred_ppl"])
+            pbar.update()
+            if is_main and step % cfg.run.log_interval == 0:
+                infos = meters.pop() | {
+                    "lr": lr,
+                    "ema_decay": ema_decay * 1000,
+                    "step": step,
+                    "epoch": epoch,
+                    "supervised_epoch": supervised_epoch,
+                }
+                wandb.log({f"train/{key}": value for key, value in infos.items()})
+                pbar.set_postfix(loss=infos["loss"], target_ppl=infos["target_ppl"], pred_ppl=infos["pred_ppl"])
+            if is_main and ckpt.save(step, epoch, supervised_epoch=supervised_epoch):
+                launch_validation(cfg, ResumeConfig(step=step, checkpoint=ckpt.last, results=ckpt.metrics))
+                for val_metric in ckpt.find_new_metrics():
+                    wandb.log(val_metric)
+            profiler.step()
 
-        if is_main and ckpt.save_final(step, epoch):
+        if is_main and ckpt.save_final(step, epoch, supervised_epoch):
             launch_validation(cfg, ResumeConfig(step=step, checkpoint=ckpt.last, results=ckpt.metrics))
         logger.info("Training finished")
 

@@ -1,0 +1,20 @@
+[run]
+workdir = "/checkpoint/metaspeechssl/mahiluthra"
+wandb_mode = "offline"
+wandb_project = "spidr_adapt_codebase"
+wandb_name = "spidr_supervised_test"
+model_type = "spidr"
+compile = false  # compile is not working for me for some reason :/
+
+[data]
+ssl.manifest = "/datasets/metaspeechssl/mahiluthra/split_vad_audio_vp20/vox19_train.csv"
+supervised.manifest = "/datasets/metaspeechssl/mahiluthra/supervised_training_newvp19_50h_train_audio.csv"
+supervised.alignments_path = "/datasets/metaspeechssl/mahiluthra/supervised_training_newvp19_50h_train_phoneme.csv"
+supervised.by_lang = true
+supervised.random_seed = 100
+
+[model]
+supervised_languages = ['sk', 'sl', 'nl', 'lt', 'sv', 'it', 'mt', 'pt', 'hu', 'et', 'hr', 'es', 'el', 'ro', 'bg', 'lv', 'fi', 'pl', 'cs']
+
+[validation]
+english.manifest = "/datasets/metaspeechssl/shared/assets/manifests/voxpopuli/finetuning/english/finetuning-dev-vadcut.csv"

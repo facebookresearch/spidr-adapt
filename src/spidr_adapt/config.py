@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, NotRequired, TypedDict
 
+ALIGNMENT_FREQ: int = 100
 SAMPLE_RATE: int = 16_000
 DEFAULT_CONV_LAYER_CONFIG: list[tuple[int, int, int]] = [(512, 10, 5)] + [(512, 3, 2)] * 4 + [(512, 2, 2)] * 2
 
@@ -54,6 +55,7 @@ class DataConfig:
     """Dataloading and data sampling configuration."""
 
     manifest: str
+    alignments_path: str | None = None
     enable_padding: bool = False
     rand_crop: bool = True
     normalize: bool = True
@@ -68,7 +70,7 @@ class DataConfig:
     persistent_workers: bool = True
     random_seed: int = 0
     bucket_method: Literal["uniform", "percentile"] = "uniform"
-    alignments_path: Path | None = None
+    by_lang: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,10 @@ class DinoSRConfig:
     ema_final_step: int = 30_000  # model.ema_anneal_end_step
     ema_exclude_layers: list[str] = field(default_factory=lambda: ["pos_conv_embed"])
     freeze_step: int = 200_000  # model.freeze_teacher_step
+    supervised_every_step: int = 2
+    supervised_layer: int = 8
+    num_supervised_layers: int = 1
+    supervised_languages: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -191,7 +197,11 @@ def read_config(path: str | Path) -> Config:
     run = RunConfig(**data["run"])  # ty: ignore[missing-argument]
     return Config(
         run=run,
-        data=DataConfig(**data["data"]),  # ty: ignore[missing-argument]
+        data=DataConfig(**data["data"])
+        if "manifest" in data["data"]
+        else {
+            k: DataConfig(**v) for k, v in data["data"].items()
+        },  # for interleaving batches across multiple datasets
         model=(DinoSRConfig if run.model_type == "dinosr" else SpidRConfig)(**data.get("model", {})),
         optimizer=OptimizerConfig(**data.get("optimizer", {})),
         masking=MaskingConfig(**data.get("masking", {})),

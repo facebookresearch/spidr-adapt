@@ -10,27 +10,32 @@ from torch.utils.data import DataLoader
 from spidr_adapt.config import Config, ResumeConfig
 from spidr_adapt.data import build_dataloader
 from spidr_adapt.environment import set_seed, setup_environment, setup_pytorch
-from spidr_adapt.models import DinoSR, build_model
+from spidr_adapt.models import SpidR, build_model
 from spidr_adapt.tools import init_logger
 
 logger = logging.getLogger()
 
 
 @torch.no_grad()
-def validate(model: DinoSR, loader: DataLoader, device: torch.device) -> dict[str, float]:
+def validate(model: SpidR, loader: DataLoader, device: torch.device) -> dict[str, float]:
     model.eval()
-    total_loss = torch.zeros(1, device=device)
+    total_ssl_loss = torch.zeros(1, device=device)
     total_target_ppl = torch.zeros(1, device=device)
     total_pred_ppl = torch.zeros(1, device=device)
-    for waveforms, attn_mask, mask in loader:
-        loss, outputs = model(waveforms.to(device), mask=mask.to(device), attention_mask=attn_mask.to(device))
-        total_loss += loss.mean()
+    for batch in loader:
+        ssl_loss, _, outputs = model(batch.to(device))  # for validation, only ssl is used
+        total_ssl_loss += ssl_loss.mean()
         total_target_ppl += outputs["target_ppl"]
         total_pred_ppl += outputs["pred_ppl"]
-    total_loss /= len(loader)
+    total_ssl_loss /= len(loader)
     total_target_ppl /= len(loader)
     total_pred_ppl /= len(loader)
-    return {"loss": total_loss.item(), "target_ppl": total_target_ppl.item(), "pred_ppl": total_pred_ppl.item()}
+    return {
+        "loss": total_ssl_loss.item(),
+        "ssl_loss": total_ssl_loss.item(),
+        "target_ppl": total_target_ppl.item(),
+        "pred_ppl": total_pred_ppl.item(),
+    }
 
 
 def validate_existing_checkpoint(cfg: Config, resume: ResumeConfig) -> None:
