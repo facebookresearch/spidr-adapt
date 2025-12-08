@@ -66,7 +66,7 @@ def launch_validation(cfg: Config, resume: ResumeConfig) -> None:
 
 def get_loss_weights_and_batch_type(
     step: int,
-    supervised_every_step: int,
+    supervised_every_step: int | None = None,
 ) -> tuple[LossWeightDefinition, BatchType]:
     """Determine the loss weights and data type based on the current step."""
     if supervised_every_step and step % supervised_every_step == 0:

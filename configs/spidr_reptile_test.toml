@@ -2,12 +2,17 @@
 workdir = "/checkpoint/metaspeechssl/mahiluthra"
 wandb_mode = "offline"
 wandb_project = "spidr_adapt_codebase"
-wandb_name = "spidr_test"
+wandb_name = "spidr_reptile_test"
 model_type = "spidr"
 compile = false  # compile is not working for me for some reason :/
 
 [data]
-manifest = "/datasets/metaspeechssl/mahiluthra/split_vad_audio_vp20/vox19_train.csv"
+ssl.manifest = "/datasets/metaspeechssl/mahiluthra/split_vad_audio_vp20/vox19_train.csv"
+ssl.by_lang = true
+ssl.lang_task_chunk_duration = 36000  # in seconds
+
+[meta_update]
+method = "reptile"
 
 [validation]
 english.manifest = "/datasets/metaspeechssl/shared/assets/manifests/voxpopuli/finetuning/english/finetuning-dev-vadcut.csv"

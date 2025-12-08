@@ -5,7 +5,8 @@ import argparse
 import os
 from pathlib import Path
 
-from spidr_adapt.config import read_config
+from spidr_adapt.config import Config, read_config
+from spidr_adapt.meta_train import meta_train
 from spidr_adapt.slurm import default_train_job_config, launch_with_submitit, slurm_config_parse_args
 from spidr_adapt.tools import init_logger
 from spidr_adapt.train import train
@@ -30,9 +31,15 @@ if __name__ == "__main__":
     parser.add_argument("--dump", type=Path, help="Submitit dump", default=os.getenv("SPIDR_SUBMITIT_FOLDER"))
     args = parser.parse_args()
 
+    def launch_training(cfg: Config) -> None:
+        if cfg.meta_update:
+            meta_train(cfg)
+        else:
+            train(cfg)
+
     if args.dump is None:
         parser.error("Dump directory must be specified with --dump or by setting $SPIDR_SUBMITIT_FOLDER")
     init_logger()
-    jobs = [(train, (read_config(cfg),)) for cfg in args.configs]
+    jobs = [(launch_training, (read_config(cfg),)) for cfg in args.configs]
     name = jobs[0][1][0].run.wandb_name
     launch_with_submitit(name, jobs, args.dump, slurm_config_parse_args(args))

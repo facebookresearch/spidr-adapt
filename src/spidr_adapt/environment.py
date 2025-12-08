@@ -1,6 +1,7 @@
 # Copyright (c) 2025 Meta Platforms, Inc. and affiliates.
 """Environment setup."""
 
+import contextvars
 import logging
 import os
 import random
@@ -13,10 +14,31 @@ import torch
 import torch._appdirs
 import torch._inductor.config
 from torch import distributed as dist
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 from spidr_adapt.tools import init_logger
 
 logger = logging.getLogger()
+
+_mesh = contextvars.ContextVar[DeviceMesh]("mesh")
+
+
+class DistributedNotInitializedError(RuntimeError):
+    """Raised when trying to access distributed variables before initializing the distributed environment."""
+
+
+def pg_ddp() -> dist.ProcessGroup:
+    try:
+        return _mesh.get().get_group("ddp")
+    except LookupError as error:
+        raise DistributedNotInitializedError from error
+
+
+def pg_metalearning() -> dist.ProcessGroup:
+    try:
+        return _mesh.get().get_group("metalearning")
+    except LookupError as error:
+        raise DistributedNotInitializedError from error
 
 
 @dataclass(frozen=True)
@@ -64,11 +86,14 @@ def distributed_environment() -> DistributedEnvironment:
     return env
 
 
-def setup_distributed() -> None:
+def setup_distributed(*, num_workers: int = 1) -> None:
     env = distributed_environment()
     logger.debug("World size %s, local rank %s, global rank %s", env.world_size, env.local_rank, env.global_rank)
-    dist.init_process_group(backend="nccl")
-    logger.debug("DDP initialized")
+    mesh_shape = (env.world_size // num_workers, num_workers)
+    if env.world_size % num_workers != 0:
+        raise ValueError(f"Invalid number of workers ({num_workers}): must divide world size {env.world_size}")
+    _mesh.set(init_device_mesh("cuda", mesh_shape, mesh_dim_names=("ddp", "metalearning")))
+    logger.debug("DeviceMesh initialized with shape %s", mesh_shape)
 
 
 def setup_environment(**kwargs: str) -> None:
@@ -105,9 +130,9 @@ def setup_pytorch(*, use_deterministic: bool) -> None:
         torch._inductor.config.fallback_random = True
 
 
-def setup_training(seed: int, *, use_deterministic: bool = False) -> None:
+def setup_training(seed: int, *, num_workers: int = 1, use_deterministic: bool = False) -> None:
     init_logger()
-    setup_distributed()
+    setup_distributed(num_workers=num_workers)
     set_seed(seed + dist.get_rank())
     setup_pytorch(use_deterministic=use_deterministic)
     setup_environment()
