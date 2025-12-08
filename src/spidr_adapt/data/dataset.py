@@ -29,7 +29,13 @@ from spidr_adapt.config import (
 )
 from spidr_adapt.data.masks import MaskGenerator
 from spidr_adapt.data.tokenizer import Tokenizer, get_tokenizer_for_lang
-from spidr_adapt.data.utils import bytes_from_archive, read_alignments, read_manifest
+from spidr_adapt.data.utils import (
+    bytes_from_archive,
+    divide_manifest_language_by_chunks,
+    read_alignments,
+    read_manifest,
+)
+from spidr_adapt.environment import pg_ddp, pg_metalearning
 
 logger = logging.getLogger()
 
@@ -176,23 +182,48 @@ class DistributedBatchSampler(DistributedSampler):
         self, batch_samplers: dict[str, BucketizeBatchSampler], *, seed: int, shuffle: bool, drop_last: bool
     ) -> None:
         self.batch_samplers = batch_samplers
-        self.num_replicas = dist.get_world_size() if dist.is_initialized() else 1
-        self.rank = dist.get_rank() if dist.is_initialized() else 0
+        self.num_replicas = dist.get_world_size(pg_ddp()) if dist.is_initialized() else 1
+        self.rank = dist.get_rank(pg_ddp()) if dist.is_initialized() else 0
+        self.metalearning_rank = dist.get_rank(pg_metalearning()) if dist.is_initialized() else 0
+        self.metalearning_world_size = dist.get_world_size(pg_metalearning()) if dist.is_initialized() else 1
         self.shuffle = shuffle
         self.epoch = 0
         self.seed = seed
         self.drop_last = drop_last
         self.shuffle = shuffle
         self.batch_language = None
+        self.batch_language_list = None
 
     def set_epoch(self, epoch: int) -> None:
         for key in self.batch_samplers:
             self.batch_samplers[key].set_epoch(epoch)
         return super().set_epoch(epoch)
 
+    def set_batch_language_task(
+        self,
+        step: int,
+        reset_interval: int,
+        fixed_language: str | None = None,
+    ) -> bool:
+        if fixed_language:
+            self.batch_language = fixed_language
+        else:
+            num_reset = step // reset_interval
+            if not self.batch_language_list:
+                g = torch.Generator()
+                g.manual_seed(self.seed)
+                languages = list(self.batch_samplers.keys())
+                shuffled_indices = torch.randperm(len(languages), generator=g)
+                self.batch_language_list = [languages[i] for i in shuffled_indices]
+            batch_language_index = (num_reset * self.metalearning_world_size + self.metalearning_rank) % len(
+                self.batch_language_list
+            )  # each worker on each reset should have a unique index
+            self.batch_language = self.batch_language_list[batch_language_index]
+        logger.info("Setting batch language task to %s", self.batch_language)
+
     def __iter__(self) -> Iterator[list[int]]:
         g = torch.Generator()
-        g.manual_seed(self.seed + self.epoch)
+        g.manual_seed(self.seed + self.epoch + self.metalearning_rank)
         subsets = []
         language_batches = (
             [self.batch_samplers[self.batch_language]] if self.batch_language else self.batch_samplers.values()
@@ -217,7 +248,7 @@ class DistributedBatchSampler(DistributedSampler):
             subsets += subset
 
         self.num_samples = len(subsets)
-        g = torch.Generator().manual_seed(self.seed + self.epoch)
+        g = torch.Generator().manual_seed(self.seed + self.epoch + self.metalearning_rank)
         if len(self.batch_samplers) > 1 and self.shuffle:  # Now shuffle across samplers
             subsets = [subsets[i] for i in torch.randperm(self.num_samples, generator=g).tolist()]
         self.subset = subsets
@@ -231,10 +262,20 @@ class SpeechDataset(Dataset, abc.ABC):
     """Dataset to load chunks of audio files."""
 
     def __init__(
-        self, manifest_path: Path | str, *, normalize: bool, alignments_path: Path | str | None = None
+        self,
+        manifest_path: Path | str,
+        *,
+        normalize: bool,
+        alignments_path: Path | str | None = None,
+        lang_task_chunk_duration: int | None = None,
+        random_seed: int = 0,
     ) -> None:
         super().__init__()
         self.manifest = read_manifest(manifest_path)
+        if lang_task_chunk_duration is not None:
+            self.manifest = divide_manifest_language_by_chunks(
+                self.manifest, SAMPLE_RATE, lang_task_chunk_duration, seed=random_seed
+            )
         self.normalize = normalize
         self.phoneme_tokens = None
         if alignments_path:
@@ -253,7 +294,7 @@ class SpeechDataset(Dataset, abc.ABC):
     def _load_audio(self, index: int) -> tuple[Tensor, int]:
         pass
 
-    def __getitem__(self, index: int) -> Tensor:
+    def __getitem__(self, index: int) -> tuple[Tensor, Tensor | None, str | None]:
         waveform, sr = self._load_audio(index)
         if sr != SAMPLE_RATE or waveform.shape[0] != 1:
             raise ValueError(index)
@@ -279,13 +320,24 @@ class SpeechDatasetFromFiles(SpeechDataset):
 
 
 def speech_dataset(
-    manifest_path: Path | str, *, normalize: bool, alignments_path: Path | str | None = None
+    manifest_path: Path | str,
+    *,
+    normalize: bool,
+    alignments_path: Path | str | None = None,
+    lang_task_chunk_duration: int | None = None,
+    random_seed: int = 0,
 ) -> SpeechDataset:
     with Path(manifest_path).open("r", encoding="utf-8") as f:
         columns = set(f.readline().strip().split(","))
     if {"fileid", "path", "num_samples", "archive", "byte_offset", "byte_size"}.issubset(columns):
         return SpeechDatasetFromArchive(manifest_path, normalize=normalize, alignments_path=alignments_path)
-    return SpeechDatasetFromFiles(manifest_path, normalize=normalize, alignments_path=alignments_path)
+    return SpeechDatasetFromFiles(
+        manifest_path,
+        normalize=normalize,
+        alignments_path=alignments_path,
+        lang_task_chunk_duration=lang_task_chunk_duration,
+        random_seed=random_seed,
+    )
 
 
 def conv_length(shapes: list[tuple[int, int, int]], length: Tensor) -> Tensor:
@@ -411,7 +463,13 @@ def build_dataloader(
         collate_phonemes=bool(data_cfg.alignments_path),
     )
 
-    dataset = speech_dataset(data_cfg.manifest, normalize=data_cfg.normalize, alignments_path=data_cfg.alignments_path)
+    dataset = speech_dataset(
+        data_cfg.manifest,
+        normalize=data_cfg.normalize,
+        alignments_path=data_cfg.alignments_path,
+        lang_task_chunk_duration=data_cfg.lang_task_chunk_duration,
+        random_seed=data_cfg.random_seed,
+    )
     if data_cfg.by_lang:
         batch_samplers = {
             lang: BucketizeBatchSampler(
@@ -515,12 +573,12 @@ class InterleaveSLDatasetLoader:
             return self.get_next_batch(self.supervised_loader_iter)
         raise ValueError(f"Unknown data type: {batch_type}")
 
-    def set_batch_language(self, step: int, reset_interval: int, reset_batch_language_method: str) -> None:
-        self.ssl_loader.batch_sampler.set_batch_language(step, reset_interval, reset_batch_language_method)
+    def set_task(self, step: int, reset_interval: int) -> None:
+        self.ssl_loader.batch_sampler.set_batch_language_task(step, reset_interval)
         self.ssl_loader_iter = iter(self.ssl_loader)
         batch_language = self.ssl_loader.batch_sampler.batch_language.split("_chunk")[0]
         if self.cfg.model.supervised_every_step:
-            self.supervised_loader.batch_sampler.set_batch_language(
-                step, reset_interval, reset_batch_language_method=None, fixed_language=batch_language
+            self.supervised_loader.batch_sampler.set_batch_language_task(
+                step, reset_interval, fixed_language=batch_language
             )
             self.supervised_loader_iter = iter(self.supervised_loader)

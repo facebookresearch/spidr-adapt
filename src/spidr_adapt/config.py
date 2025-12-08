@@ -71,6 +71,7 @@ class DataConfig:
     random_seed: int = 0
     bucket_method: Literal["uniform", "percentile"] = "uniform"
     by_lang: bool = False
+    lang_task_chunk_duration: int | None = None  # in seconds
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,9 @@ class OptimizerConfig:
     rsqrt_timescale: int = 10_000
     rsqrt_shift: int = 0
 
-    scheduler: Literal["tristage", "cosine", "rsqrt", "constant"] = "tristage"
+    scheduler: Literal["tristage", "cosine", "rsqrt", "constant", "cyclic"] = "tristage"
+    upper_envelope_shape: Literal["tristage", "constant", "warmupconstant"] = "tristage"  # for use with CyclicLR
+    within_cycle_warmup_steps: int = 600  # for use with CyclicLR
 
     exclude_from_optimizer: list[str] = field(default_factory=lambda: ["teacher"])
     to_freeze: list[str] = field(default_factory=lambda: ["feature_extractor", "feature_projection"])
@@ -135,7 +138,7 @@ class DinoSRConfig:
     ema_final_step: int = 30_000  # model.ema_anneal_end_step
     ema_exclude_layers: list[str] = field(default_factory=lambda: ["pos_conv_embed"])
     freeze_step: int = 200_000  # model.freeze_teacher_step
-    supervised_every_step: int = 2
+    supervised_every_step: int | None = None
     supervised_layer: int = 8
     num_supervised_layers: int = 1
     supervised_languages: list[str] | None = None
@@ -148,6 +151,19 @@ class SpidRConfig(DinoSRConfig):
     ema_timescale: float = 20_000
     ema_threshold: float = 1e-7
     encoder_layer_drop: float = 0.0  # model.encoder_layerdrop
+
+
+@dataclass(frozen=True, kw_only=True)
+class SpidRWithResetConfig(SpidRConfig):
+    adapt_heads: bool = True
+
+
+@dataclass(frozen=True)
+class MetaUpdateConfig:
+    method: Literal["reptile", "foblo"] | None = None
+    num_workers: int = 8
+    beta: float = 0.1
+    inner_step: int = 2000
 
 
 @dataclass(frozen=True)
@@ -174,10 +190,11 @@ class Config:
 
     run: RunConfig
     data: DataConfig
-    model: DinoSRConfig | SpidRConfig
+    model: DinoSRConfig | SpidRConfig | SpidRWithResetConfig
     optimizer: OptimizerConfig
     masking: MaskingConfig
     validation: dict[str, DataConfig]
+    meta_update: MetaUpdateConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -202,8 +219,9 @@ def read_config(path: str | Path) -> Config:
         else {
             k: DataConfig(**v) for k, v in data["data"].items()
         },  # for interleaving batches across multiple datasets
-        model=(DinoSRConfig if run.model_type == "dinosr" else SpidRConfig)(**data.get("model", {})),
+        model=(SpidRConfig if run.model_type == "spidr" else SpidRWithResetConfig)(**data.get("model", {})),
         optimizer=OptimizerConfig(**data.get("optimizer", {})),
         masking=MaskingConfig(**data.get("masking", {})),
         validation={k: DataConfig(**v) for k, v in data["validation"].items()} if "validation" in data else {},  # ty: ignore[missing-argument]
+        meta_update=MetaUpdateConfig(**data.get("meta_update")) if data.get("meta_update") else None,
     )
