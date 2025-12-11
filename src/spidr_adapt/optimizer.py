@@ -12,17 +12,15 @@ from spidr_adapt.config import OptimizerConfig
 
 
 class CyclicLR(LRScheduler):
-    def __init__(self, opt: Optimizer, cfg: OptimizerConfig, reset_interval: int, last_epoch: int = -1) -> None:
+    def __init__(self, opt: Optimizer, cfg: OptimizerConfig, task_interval: int, last_epoch: int = -1) -> None:
         self.opt = opt
         self.cfg = cfg
         assert self.cfg.within_cycle_warmup_steps, "within_cycle_warmup_steps is required for CyclicLR"
-        self.reset_interval = reset_interval
+        self.task_interval = task_interval
         self.init_lr_scale = cfg.init_lr_scale if cfg.warmup_steps > 0 else 1
         super().__init__(opt, last_epoch)
 
-    def upper_envelope(self, cycle_index: int) -> list[float]:
-        envelope_index = cycle_index * self.reset_interval
-        upper_envelope_shape = self.cfg.upper_envelope_shape
+    def upper_envelope(self, envelope_index: int, upper_envelope_shape: str) -> list[float]:
         if upper_envelope_shape == "tristage":
             end_of_hold_steps = self.cfg.hold_steps + self.cfg.warmup_steps
             if self.last_epoch <= self.cfg.warmup_steps:
@@ -53,19 +51,54 @@ class CyclicLR(LRScheduler):
         return envelope_value
 
     def get_lr(self) -> list[float]:
-        cycle_index = self.last_epoch // self.reset_interval + 1  # lr value of the end of each reset envelope
-        max_lr = self.upper_envelope(cycle_index)  # Get the max lr for the current cycle
+        envelope_index = (self.last_epoch // self.task_interval + 1) * self.task_interval
+        max_lr = self.upper_envelope(envelope_index, self.cfg.upper_envelope_shape)
         min_lr = max_lr * self.init_lr_scale
-        if self.last_epoch % self.reset_interval < self.cfg.within_cycle_warmup_steps:  # Warmup phase
+        if self.last_epoch % self.task_interval < self.cfg.within_cycle_warmup_steps:  # Warmup phase
             return [
                 min_lr
-                + (max_lr - min_lr) * (self.last_epoch % self.reset_interval) / self.cfg.within_cycle_warmup_steps
+                + (max_lr - min_lr) * (self.last_epoch % self.task_interval) / self.cfg.within_cycle_warmup_steps
                 for _ in self.opt.param_groups
             ]
-        return [max_lr for _ in self.opt.param_groups]  # hold phase
+        return [max_lr for _ in self.opt.param_groups]
 
 
-def build_scheduler(opt: Optimizer, cfg: OptimizerConfig, reset_interval: int | None) -> LRScheduler:
+class CyclicDualLR(CyclicLR):
+    def __init__(
+        self,
+        opt: Optimizer,
+        cfg: OptimizerConfig,
+        task_interval: int,
+        inner_step: int,
+        last_epoch: int = -1,
+    ) -> None:
+        self.inner_step = inner_step
+        super().__init__(opt, cfg, task_interval, last_epoch)
+
+    def get_lr(self) -> list[float]:
+        if self.last_epoch % self.task_interval < self.inner_step:
+            envelope_index = (self.last_epoch // self.task_interval + 1) * self.task_interval
+            max_lr_ssl = self.upper_envelope(envelope_index, self.cfg.upper_envelope_shape)
+            min_lr_ssl = max_lr_ssl * self.init_lr_scale
+            if self.last_epoch % self.task_interval < self.cfg.within_cycle_warmup_steps:  # Warmup phase
+                return [
+                    min_lr_ssl
+                    + (max_lr_ssl - min_lr_ssl)
+                    * (self.last_epoch % self.task_interval)
+                    / self.cfg.within_cycle_warmup_steps
+                    for _ in self.opt.param_groups
+                ]
+            return [max_lr_ssl for _ in self.opt.param_groups]
+        lr_sl = self.upper_envelope(self.last_epoch, "tristage")
+        return [lr_sl for _ in self.opt.param_groups]
+
+
+def build_scheduler(
+    opt: Optimizer,
+    cfg: OptimizerConfig,
+    task_interval: int | None,
+    inner_step: int | None,
+) -> LRScheduler:
     init_lr_scale = cfg.init_lr_scale if cfg.warmup_steps > 0 else 1
     decay: LRScheduler
     if cfg.scheduler == "tristage":
@@ -92,13 +125,20 @@ def build_scheduler(opt: Optimizer, cfg: OptimizerConfig, reset_interval: int | 
         hold = LinearLR(opt, start_factor=1.0, total_iters=cfg.max_steps)
         return SequentialLR(opt, [warmup, hold], [cfg.warmup_steps])
     if cfg.scheduler == "cyclic":
-        assert reset_interval, "Reset interval is required for CyclicLR scheduler"
-        return CyclicLR(opt, cfg, reset_interval)
+        assert task_interval, "Reset interval is required for CyclicLR scheduler"
+        return CyclicLR(opt, cfg, task_interval)
+    if cfg.scheduler == "cyclic_dual_loss":
+        assert task_interval, "Reset interval is required for CyclicLR scheduler"
+        assert inner_step, "FOBLO wth inner_step is required for CyclicLR_firstorder scheduler"
+        return CyclicDualLR(opt, cfg, task_interval, inner_step)
     raise ValueError(f"Unknown scheduler: {cfg.scheduler}")
 
 
 def build_optimizer(
-    model: torch.nn.Module, cfg: OptimizerConfig, reset_interval: int | None = None
+    model: torch.nn.Module,
+    cfg: OptimizerConfig,
+    task_interval: int | None = None,
+    inner_step: int | None = None,
 ) -> tuple[AdamW, GradScaler, LRScheduler]:
     if cfg.dtype not in {"float32", "float16", "bfloat16"}:
         raise ValueError(cfg.dtype)
@@ -114,5 +154,5 @@ def build_optimizer(
 
     optimizer = AdamW(param_groups, lr=cfg.lr, weight_decay=cfg.weight_decay, betas=cfg.betas, eps=cfg.eps, fused=True)
     scaler = GradScaler("cuda", enabled=cfg.mixed_precision)
-    scheduler = build_scheduler(optimizer, cfg, reset_interval)
+    scheduler = build_scheduler(optimizer, cfg, task_interval, inner_step)
     return optimizer, scaler, scheduler

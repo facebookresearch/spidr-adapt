@@ -45,6 +45,8 @@ def copy_code_to_submitit_folder(output_dir: Path) -> None:
         f"--exclude '*.pt' "
         f"--exclude '.ruff_cache/' "
         f"--exclude '.mypy_cache/' "
+        f"--exclude='.github/' "
+        f"--exclude='.venv/' "
         f"{root}/ {output_dir}"
     )
     subprocess.call([rsync_cmd], shell=True)

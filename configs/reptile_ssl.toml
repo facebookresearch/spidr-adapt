@@ -1,0 +1,38 @@
+[data]
+ssl.manifest = "/path/to/manifests/ssl/.csv"
+ssl.by_lang = true
+ssl.lang_task_chunk_duration = 36000
+
+[run]
+model_type = "spidr_reset"
+compile = false
+save_interval = 10000
+keep_latest = 2
+workdir = "/path/to/workdir"
+wandb_mode = "offline"
+wandb_project = "spidr_adapt_test"
+wandb_name = "reptile_ssl"
+init_ckpt = "/path/to/ssl/initialization/checkpoint.pt"
+
+[model]
+encoder_layer_drop = 0.05
+ema_start_decay = 1.0
+ema_final_decay = 1.0
+
+[optimizer]
+lr = 5e-5
+scheduler = "cyclic"
+max_steps = 200_000
+warmup_steps = 12_000
+hold_steps = 88_000
+decay_steps = 100_000
+
+[meta_update]
+num_workers = 8
+task_interval = 2000
+method = "reptile"
+beta = 0.1
+inner_step = 2000
+
+[validation]
+english.manifest = "/path/to/manifests/.csv"

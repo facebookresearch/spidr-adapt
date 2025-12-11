@@ -9,10 +9,10 @@ from typing import Literal, NotRequired, TypedDict
 
 ALIGNMENT_FREQ: int = 100
 SAMPLE_RATE: int = 16_000
-DEFAULT_CONV_LAYER_CONFIG: list[tuple[int, int, int]] = [(512, 10, 5)] + [(512, 3, 2)] * 4 + [(512, 2, 2)] * 2
+DEFAULT_CONV_LAYER_CONFIG: list[tuple[int, int, int]] = [[512, 10, 5]] + [[512, 3, 2]] * 4 + [[512, 2, 2]] * 2
 
 MaskingStrategy = Literal["static", "uniform", "normal", "poisson"]
-ModelType = Literal["dinosr", "spidr"]
+ModelType = Literal["dinosr", "spidr", "spidr_reset"]
 
 
 class SlurmConfig(TypedDict):
@@ -95,7 +95,7 @@ class OptimizerConfig:
     rsqrt_timescale: int = 10_000
     rsqrt_shift: int = 0
 
-    scheduler: Literal["tristage", "cosine", "rsqrt", "constant", "cyclic"] = "tristage"
+    scheduler: Literal["tristage", "cosine", "rsqrt", "constant", "cyclic", "cyclic_dual_loss"] = "tristage"
     upper_envelope_shape: Literal["tristage", "constant", "warmupconstant"] = "tristage"  # for use with CyclicLR
     within_cycle_warmup_steps: int = 600  # for use with CyclicLR
 
@@ -163,7 +163,8 @@ class MetaUpdateConfig:
     method: Literal["reptile", "foblo"] | None = None
     num_workers: int = 8
     beta: float = 0.1
-    inner_step: int = 2000
+    task_interval: int = 2000
+    inner_step: int = 1800
 
 
 @dataclass(frozen=True)

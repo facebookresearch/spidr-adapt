@@ -55,13 +55,15 @@ class SpidRWithReset(SpidR):
 
     def __init__(self, cfg: SpidRWithResetConfig) -> None:
         super().__init__(cfg)
-        self.reset_interval = cfg.reset_interval
         self.adapt_heads = cfg.adapt_heads
 
+    def set_task_internal(self, task_interval: int) -> None:
+        self.task_interval = task_interval
+
     def should_reset(self, step: int) -> bool:
-        if self.reset_interval is None or not self.training:
+        if self.task_interval is None or not self.training:
             return False
-        return step % self.reset_interval == 0
+        return step % self.task_interval == 0
 
     def get_ssl_loss(
         self,
@@ -76,7 +78,7 @@ class SpidRWithReset(SpidR):
         losses = torch.zeros(interm[0].shape[0], device=device)
         target_ppl, pred_ppl = torch.zeros((), device=device), torch.zeros((), device=device)
         if should_reset:
-            logger.info("Reset codebook and heads at step %s", self.current_step.item())
+            logger.info("Active Forgetting on codebook and heads at step %s", self.current_step.item())
             reset_codebooks_and_heads(self)
         for i, (y, target) in enumerate(zip(interm, targets, strict=True)):
             onehot_target = self.codebooks[i](target)

@@ -2,6 +2,7 @@
 """Model loading utilities."""
 
 import json
+import logging
 import typing as tp
 import warnings
 from collections import OrderedDict
@@ -13,34 +14,44 @@ import torch
 from torch.hub import load_state_dict_from_url
 from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 
-from spidr_adapt.config import DinoSRConfig, ModelType, SpidRConfig
+from spidr_adapt.config import DinoSRConfig, ModelType, SpidRConfig, SpidRWithResetConfig
 from spidr_adapt.models.dinosr import DinoSR
 from spidr_adapt.models.spidr import SpidR
+from spidr_adapt.models.spidr_reset import SpidRWithReset
+
+logger = logging.getLogger()
 
 
 def model_from_raw_checkpoint(
     model_class: type[SpidR] | type[DinoSR],
     config_class: type[DinoSRConfig] | type[SpidRConfig],
     ckpt: str | Path,
+    cfg: SpidRWithResetConfig | None = None,
 ) -> DinoSR | SpidR:
     path = Path(ckpt)
     if path.suffix != ".pt":
         raise ValueError("Only .pt files are supported.")
-    if (path.parent / "config.json").is_file():
-        with (path.parent / "config.json").open() as f:
-            json_cfg = json.load(f)
-            if "model" in json_cfg:
-                json_cfg = json_cfg["model"]
-            cfg = config_class(**json_cfg)
-    else:
-        warnings.warn("Config file not found when loading checkpoint. Using default config.", stacklevel=2)
-        cfg = config_class()
+    if cfg is None:
+        if (path.parent / "config.json").is_file():
+            with (path.parent / "config.json").open() as f:
+                json_cfg = json.load(f)
+                if "model" in json_cfg:
+                    json_cfg = json_cfg["model"]
+                cfg = config_class(**json_cfg)
+        else:
+            warnings.warn("Config file not found when loading checkpoint. Using default config.", stacklevel=2)
+            cfg = config_class()
+
     instance = model_class(cfg)
     state_dict = torch.load(path, map_location="cpu", weights_only=True)
     if "model" in state_dict:
         state_dict = state_dict["model"]
     consume_prefix_in_state_dict_if_present(state_dict, "module.")
-    instance.load_state_dict(state_dict)
+    missing_keys, unexpected_keys = instance.load_state_dict(state_dict, strict=False)
+    if len(missing_keys) > 0:
+        logger.warning("Missing keys when loading state_dict %s", missing_keys)
+    if len(unexpected_keys) > 0:
+        logger.warning("Unexpected keys when loading state_dict %s", unexpected_keys)
     return instance
 
 
@@ -56,8 +67,12 @@ def build_model(
                 return model_from_raw_checkpoint(DinoSR, DinoSRConfig, checkpoint)
             case "spidr":
                 return model_from_raw_checkpoint(SpidR, SpidRConfig, checkpoint)
+            case "spidr_reset":
+                return model_from_raw_checkpoint(SpidRWithReset, SpidRWithResetConfig, checkpoint, cfg)
             case _:
                 raise ValueError(f"Model type not recognized, acceptable models are {tp.get_args(ModelType)}.")
+    if isinstance(cfg, SpidRWithResetConfig):
+        return SpidRWithReset(cfg)
     if isinstance(cfg, SpidRConfig):
         return SpidR(cfg)
     if isinstance(cfg, DinoSRConfig):  # Must be last condition because SpidRConfig is subclass of DinoSRConfig
