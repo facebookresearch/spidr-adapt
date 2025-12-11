@@ -15,15 +15,22 @@ logger = logging.getLogger()
 
 
 class Reptile(MetaUpdater):
-    def __init__(self, *, model: nn.Module, beta: float) -> None:
+    def __init__(self, *, model: nn.Module, beta: float, task_interval: int) -> None:
         """Distributed Reptile.
 
         This class is generic and works with any PyTorch Module.
         """
-        super().__init__(model=model, beta=beta)
+        super().__init__(model=model, beta=beta, task_interval=task_interval)
 
     @torch.no_grad()
     def forward(self, model: nn.Module) -> None:
+        step = model.current_step.item() - 1
+        logger.debug(
+            "Reptile meta-update at episode %s at local step %s, at the global step %s.",
+            step // self.task_interval,
+            step % self.task_interval,
+            step,
+        )
         logger.debug("Reptile updates performed at step %s", model.current_step.item())
         central_lerp, central_copy = parameters_to_sync(self.central)
         worker_lerp, worker_copy = parameters_to_sync(model)

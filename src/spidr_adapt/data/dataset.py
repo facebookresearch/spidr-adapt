@@ -530,12 +530,11 @@ class InterleaveSLDatasetLoader:
         self.epoch = epoch
         self.start_new_epoch(BatchType.SSL)
 
-        if cfg.model.supervised_every_step:
-            supervised_data_cfg = (
-                cfg.data.get(BatchType.SUPERVISED.name.lower(), None) if isinstance(cfg.data, dict) else None
-            )
-            assert supervised_data_cfg, "Supervised interleaved training requires supervised data in the config."
-            self.supervised_loader, self.supervised_loader_iter = self.initialize_loaders(supervised_data_cfg)
+        self.supervised_data_cfg = (
+            cfg.data.get(BatchType.SUPERVISED.name.lower(), None) if isinstance(cfg.data, dict) else None
+        )
+        if self.supervised_data_cfg:
+            self.supervised_loader, self.supervised_loader_iter = self.initialize_loaders(self.supervised_data_cfg)
             self.supervised_epoch = supervised_epoch
             self.start_new_epoch(BatchType.SUPERVISED)
 
@@ -577,7 +576,8 @@ class InterleaveSLDatasetLoader:
         self.ssl_loader.batch_sampler.set_batch_language_task(step, reset_interval)
         self.ssl_loader_iter = iter(self.ssl_loader)
         batch_language = self.ssl_loader.batch_sampler.batch_language.split("_chunk")[0]
-        if self.cfg.model.supervised_every_step:
+
+        if self.supervised_data_cfg:
             self.supervised_loader.batch_sampler.set_batch_language_task(
                 step, reset_interval, fixed_language=batch_language
             )

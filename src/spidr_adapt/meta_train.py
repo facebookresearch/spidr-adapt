@@ -17,8 +17,8 @@ from spidr_adapt.checkpoint import Checkpointer, remove_param_group
 from spidr_adapt.config import SAMPLE_RATE, Config, DataConfig, MetaUpdateConfig, ResumeConfig, read_config
 from spidr_adapt.data import BatchType, InterleaveSLDatasetLoader, get_number_of_data_chunks
 from spidr_adapt.environment import pg_ddp, pg_metalearning, setup_training
-from spidr_adapt.metalearning import MetaUpdater, Reptile
-from spidr_adapt.models import LossWeightDefinition, SpidRWithReset, build_model
+from spidr_adapt.metalearning import META_UPDATER_CLASSES
+from spidr_adapt.models import LossWeightDefinition, build_model
 from spidr_adapt.optimizer import build_optimizer
 from spidr_adapt.tools import AverageMeters, profiler_context
 from spidr_adapt.train import init_wandb, launch_validation
@@ -50,7 +50,7 @@ def get_meta_train_dataloader(
     """
     ssl_data_cfg = cfg.data if isinstance(cfg.data, DataConfig) else cfg.data[BatchType.SSL.name.lower()]
     supervised_data_cfg = None if isinstance(cfg.data, DataConfig) else cfg.data.get(BatchType.SUPERVISED.name.lower())
-    num_reset = step // cfg.meta_update.inner_step
+    num_reset = step // cfg.meta_update.task_interval
     if num_reset == 0:
         return InterleaveSLDatasetLoader(cfg, epoch, supervised_epoch=supervised_epoch)
     # create new ssl data config to change seed
@@ -83,18 +83,26 @@ def should_reset_data_loader(
     return 0 <= batch_language_index < metalearning_size
 
 
-def get_meta_updater(meta_update_cfg: MetaUpdateConfig, model: SpidRWithReset) -> MetaUpdater:
+def get_meta_loss_weights_and_batch_type(
+    step: int, meta_update_cfg: MetaUpdateConfig
+) -> tuple[LossWeightDefinition, BatchType]:
+    """Determine the loss weights and data type based on the current step."""
     if meta_update_cfg.method == "reptile":
-        meta_updater = Reptile(model=model, beta=meta_update_cfg.beta)
+        loss_weights = LossWeightDefinition(ssl=1.0, supervised=0.0)
+        batch_type = BatchType.SSL
     elif meta_update_cfg.method == "foblo":
-        # TODO: Jiayi to implement FOBLO
-        raise ValueError("FOBLO not implemented yet")
+        if (step % meta_update_cfg.task_interval) < meta_update_cfg.inner_step:
+            loss_weights = LossWeightDefinition(ssl=1.0, supervised=0.0)
+            batch_type = BatchType.SSL
+        else:
+            loss_weights = LossWeightDefinition(ssl=0.0, supervised=1.0)
+            batch_type = BatchType.SUPERVISED
     else:
         raise ValueError(f"Unknown meta_update method: {meta_update_cfg.method}")
-    return meta_updater
+    return loss_weights, batch_type
 
 
-def meta_train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
+def meta_train(cfg: Config) -> None:  # noqa: C901, PLR0912, PLR0914, PLR0915
     with ExitStack() as stack:
         logger.info("Starting job")
         setup_training(
@@ -118,8 +126,12 @@ def meta_train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
         dtype = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}[cfg.optimizer.dtype]
         model = build_model(cfg=cfg.model, model_type=cfg.run.model_type, checkpoint=cfg.run.init_ckpt)
         model = model.to(device).train()
+        model.set_task_internal(getattr(cfg.meta_update, "task_interval", None))
         optimizer, scaler, scheduler = build_optimizer(
-            model, cfg.optimizer, getattr(cfg.meta_update, "inner_step", None)
+            model,
+            cfg.optimizer,
+            getattr(cfg.meta_update, "task_interval", None),
+            getattr(cfg.meta_update, "inner_step", None),
         )
         dist.barrier(device_ids=[device.index])
         ckpt = Checkpointer(cfg.run.dir, cfg.run.save_interval, cfg.run.keep_latest)
@@ -131,7 +143,8 @@ def meta_train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
         loader = get_meta_train_dataloader(
             cfg, step, epoch, supervised_epoch, metalearning_size, metalearning_rank, num_tasks
         )
-        loader.set_task(step, cfg.meta_update.inner_step)
+        loader.set_task(step, cfg.meta_update.task_interval)
+
         if not resuming and is_main and ckpt.save(step, epoch, supervised_epoch=supervised_epoch):
             launch_validation(cfg, ResumeConfig(step=step, checkpoint=ckpt.last, results=ckpt.metrics))
         if cfg.run.compile:
@@ -140,7 +153,10 @@ def meta_train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
         ddp_model = DistributedDataParallel(
             model, device_ids=[device.index], find_unused_parameters=True, process_group=pg_ddp()
         )
-        meta_updater = get_meta_updater(cfg.meta_update, model)
+
+        meta_updater = META_UPDATER_CLASSES[cfg.meta_update.method](
+            model=model, beta=cfg.meta_update.beta, task_interval=cfg.meta_update.task_interval
+        )
 
         logger.info("Starting training loop")
         meters = AverageMeters(
@@ -149,13 +165,14 @@ def meta_train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
         profiler = stack.enter_context(profiler_context(cfg.run.dir / "trace.html" if is_main else None))
         pbar = stack.enter_context(tqdm(total=cfg.optimizer.max_steps, initial=step, disable=not is_main))
         while step < cfg.optimizer.max_steps:
-            batch = loader.load_batch_data(BatchType.SSL)
+            loss_weights, batch_type = get_meta_loss_weights_and_batch_type(step, cfg.meta_update)
+            batch = loader.load_batch_data(batch_type)
+
             if step >= cfg.optimizer.max_steps:
                 break
             if step == cfg.model.freeze_step and len(optimizer.param_groups) > 1:
                 remove_param_group(optimizer, 1)
 
-            loss_weights = LossWeightDefinition(ssl=1.0, supervised=0.0)
             with torch.autocast("cuda", dtype, cfg.optimizer.mixed_precision):
                 ssl_loss, supervised_loss, outputs = ddp_model(batch.to(device), loss_weights=loss_weights)
             num_frames = torch.tensor(ssl_loss.size(0), dtype=torch.long, device=device)
@@ -172,18 +189,18 @@ def meta_train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
             scheduler.step()
             step += 1
             ema_decay = model.update_ema(step)
-            if step % cfg.meta_update.inner_step == 0:
-                # TODO: Jiayi to implement forward of FOBLO
-                meta_updater(model)  # meta_train update after inner loop
 
-                # reset task after inner loop
+            if step % cfg.meta_update.task_interval == 0:
+                meta_updater(model)
                 if should_reset_data_loader(
-                    step, cfg.meta_update.inner_step, metalearning_size, metalearning_rank, num_tasks
+                    step, cfg.meta_update.task_interval, metalearning_size, metalearning_rank, num_tasks
                 ):
                     loader = get_meta_train_dataloader(
                         cfg, step, epoch, supervised_epoch, metalearning_size, metalearning_rank, num_tasks
                     )
-                loader.set_task(step, cfg.meta_update.inner_step)
+                loader.set_task(step, cfg.meta_update.task_interval)
+            if step % cfg.meta_update.task_interval == cfg.meta_update.inner_step:
+                meta_updater.perform_inner_update(model)
 
             meters.update(loss=loss.detach(), supervised_loss=supervised_loss.detach(), ssl_loss=ssl_loss.detach())
             meters.update(batch_size=batch.waveforms.size(0), grad_norm=grad_norm)

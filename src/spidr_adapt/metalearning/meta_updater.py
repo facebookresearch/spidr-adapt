@@ -30,7 +30,7 @@ def parameters_to_sync(model: nn.Module) -> tuple[tuple[nn.Parameter, ...], tupl
 
 
 class MetaUpdater(nn.Module):
-    def __init__(self, *, model: nn.Module, beta: float) -> None:
+    def __init__(self, *, model: nn.Module, beta: float, task_interval: int) -> None:
         """Distributed MetaUpdater.
 
         This class is generic and works with any PyTorch Module.
@@ -38,10 +38,15 @@ class MetaUpdater(nn.Module):
         """
         super().__init__()
         self.beta = beta
+        self.task_interval = task_interval
         self.num_workers = dist.get_world_size(pg_metalearning()) if dist.is_initialized() else 1
         if self.num_workers > 1:
             sync_module_states(model, pg_metalearning(), src=0)
         self.central = copy.deepcopy(model).eval()
+
+    @torch.no_grad()
+    def perform_inner_update(self, model: nn.Module) -> None:
+        pass
 
     @torch.no_grad()
     def forward(self, model: nn.Module) -> None:

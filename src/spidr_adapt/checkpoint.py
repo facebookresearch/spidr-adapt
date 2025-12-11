@@ -150,7 +150,7 @@ class Checkpointer:
             return False
         if path.name == "final.pt":
             logger.warning("Loading final checkpoint")
-        ckpt = torch.load(path, map_location=torch.device("cpu"), weights_only=True)
+        ckpt = torch.load(path, map_location=torch.device("cpu"), weights_only=False)
         self._state.step = ckpt["step"]
         self._state.epoch = ckpt["epoch"]
         self._state.supervised_epoch = ckpt["supervised_epoch"]
@@ -173,7 +173,7 @@ class Checkpointer:
         return True
 
     def load_existing_run(self) -> bool:
-        if (path := self.last) is None:
+        if (path := self.last) is None or self.last.stem == "step_0":
             return False
         return self._load_from_path(path)
 
