@@ -9,7 +9,6 @@ supervised.random_seed = 100
 
 [run]
 model_type = "spidr_reset"
-compile = false
 save_interval = 10000
 keep_latest = 2
 workdir = "/path/to/workdir"

@@ -20,7 +20,6 @@ logger = logging.getLogger()
 
 
 @torch.no_grad()
-@torch.compiler.disable
 def reset_codebooks_and_heads(model: SpidR) -> None:
     for i, module in enumerate(model.codebooks):
         codebook_size, encoder_embed_dim = module.codebook.size()
@@ -38,7 +37,6 @@ def reset_codebooks_and_heads(model: SpidR) -> None:
 
 
 @torch.autocast("cuda", enabled=False)
-@torch.compiler.disable
 def adapt_head(head: nn.Sequential, inp_head: Tensor, labels: Tensor, *, lr: float = 5e-2, steps: int = 20) -> None:
     optimizer = SGD(head.parameters(), lr=lr)
     inp_head_nograd = inp_head.detach().float()

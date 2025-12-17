@@ -72,8 +72,8 @@ def build_model(
     raise ValueError("Invalid cfg class")
 
 
-def spidr_adapt_base(*, pretrained: bool = True, check_hash: bool = False, progress: bool = True) -> SpidR:
-    model = SpidR(SpidRConfig())
+def spidr_adapt_base(*, pretrained: bool = True, check_hash: bool = False, progress: bool = True) -> SpidRWithReset:
+    model = SpidRWithReset(SpidRWithResetConfig())
     if pretrained:
         url = ""  # TODO: add path
         checkpoint = load_state_dict_from_url(url, check_hash=check_hash, progress=progress, map_location="cpu")

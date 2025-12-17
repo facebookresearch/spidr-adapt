@@ -40,7 +40,6 @@ class RunConfig:
     log_interval: int = 200
     save_interval: int = 2_500
     init_ckpt: str | None = None
-    compile: bool = True
     keep_latest: int = -1
     model_type: ModelType = "spidr"
     slurm_validation: SlurmConfig | None = None

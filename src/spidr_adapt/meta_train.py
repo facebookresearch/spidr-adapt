@@ -147,9 +147,6 @@ def meta_train(cfg: Config) -> None:  # noqa: C901, PLR0912, PLR0914, PLR0915
 
         if not resuming and is_main and ckpt.save(step, epoch, supervised_epoch=supervised_epoch):
             launch_validation(cfg, ResumeConfig(step=step, checkpoint=ckpt.last, results=ckpt.metrics))
-        if cfg.run.compile:
-            model.compile(dynamic=True)
-            model._inner_ema = torch.compile(model._inner_ema)
         ddp_model = DistributedDataParallel(
             model, device_ids=[device.index], find_unused_parameters=True, process_group=pg_ddp()
         )
