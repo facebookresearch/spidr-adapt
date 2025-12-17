@@ -12,7 +12,7 @@ SAMPLE_RATE: int = 16_000
 DEFAULT_CONV_LAYER_CONFIG: list[tuple[int, int, int]] = [[512, 10, 5]] + [[512, 3, 2]] * 4 + [[512, 2, 2]] * 2
 
 MaskingStrategy = Literal["static", "uniform", "normal", "poisson"]
-ModelType = Literal["dinosr", "spidr", "spidr_reset"]
+ModelType = Literal["spidr", "spidr_reset"]
 
 
 class SlurmConfig(TypedDict):
@@ -42,7 +42,7 @@ class RunConfig:
     init_ckpt: str | None = None
     compile: bool = True
     keep_latest: int = -1
-    model_type: ModelType = "dinosr"
+    model_type: ModelType = "spidr"
     slurm_validation: SlurmConfig | None = None
 
     @property
@@ -108,8 +108,8 @@ class OptimizerConfig:
 
 
 @dataclass(frozen=True)
-class DinoSRConfig:
-    """DinoSR configuration. Corresponding names in `fairseq` in comments."""
+class SpidRConfig:
+    """SpidR configuration"""
 
     extractor_mode: Literal["group_norm", "layer_norm"] = "layer_norm"  # model.extractor_mode
     extractor_conv_bias: bool = False  # model.conv_bias
@@ -127,30 +127,21 @@ class DinoSRConfig:
     encoder_ff_interm_dropout: float = 0.0  # model.activation_dropout
     encoder_dropout: float = 0.1  # model.dropout
     encoder_layer_norm_first: bool = False  # model.layer_norm_first
-    encoder_layer_drop: float = 0.05  # model.encoder_layerdrop
+    encoder_layer_drop: float = 0.00  # model.encoder_layerdrop
     encoder_qkv_bias: bool = False  # WARNING: not in `fairseq`, always True there.
 
     codebook_size: int = 256  # model.codebook_size
     codebook_decay: float = 0.9  # model.codebook_decay
     num_codebooks: int = 8  # model.average_top_k_layers
     ema_start_decay: float = 0.999  # model.ema_decay
-    ema_final_decay: float = 0.9999  # model.ema_end_decay
-    ema_final_step: int = 30_000  # model.ema_anneal_end_step
+    ema_timescale: float = 20_000
+    ema_threshold: float = 1e-7
     ema_exclude_layers: list[str] = field(default_factory=lambda: ["pos_conv_embed"])
     freeze_step: int = 200_000  # model.freeze_teacher_step
     supervised_every_step: int | None = None
     supervised_layer: int = 8
     num_supervised_layers: int = 1
     supervised_languages: list[str] | None = None
-
-
-@dataclass(frozen=True)
-class SpidRConfig(DinoSRConfig):
-    """SpidR configuration. Corresponding names in `fairseq` in comments."""
-
-    ema_timescale: float = 20_000
-    ema_threshold: float = 1e-7
-    encoder_layer_drop: float = 0.0  # model.encoder_layerdrop
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -191,7 +182,7 @@ class Config:
 
     run: RunConfig
     data: DataConfig
-    model: DinoSRConfig | SpidRConfig | SpidRWithResetConfig
+    model: SpidRConfig | SpidRWithResetConfig
     optimizer: OptimizerConfig
     masking: MaskingConfig
     validation: dict[str, DataConfig]
