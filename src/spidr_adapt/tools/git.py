@@ -32,7 +32,6 @@ def git_info() -> GitInfo:
 
 
 def write_git_info_if_available(path: str | Path) -> None:
-    return  # fix after first commit
     if not git_available():
         return
     info = git_info()
