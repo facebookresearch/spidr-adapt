@@ -8,4 +8,4 @@ from torch.hub import _add_to_sys_path  # noqa: PLC2701
 dependencies = ["torch", "numpy"]
 
 with _add_to_sys_path(str(Path(__file__).parent / "src")):
-    from spidr.models import dinosr_base_original, dinosr_base_reproduced, spidr_base  # noqa: F401
+    from spidr_adapt.models import spidr_adapt_base  # noqa: F401

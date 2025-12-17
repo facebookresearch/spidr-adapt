@@ -1,5 +1,5 @@
 # Copyright (c) 2025 Meta Platforms, Inc. and affiliates.
-"""Model components for DinoSR and SpidR."""
+"""Model components for SpidR."""
 
 import math
 from typing import NamedTuple
@@ -9,7 +9,7 @@ from torch import Tensor, nn
 from torch import distributed as dist
 from torch.nn import functional as F
 
-from spidr_adapt.config import DinoSRConfig
+from spidr_adapt.config import SpidRConfig
 
 
 class LayerNorm(nn.LayerNorm):
@@ -325,7 +325,7 @@ class Codebook(nn.Module):
 
 
 def get_components(
-    cfg: DinoSRConfig,
+    cfg: SpidRConfig,
 ) -> tuple[FeatureExtractor, FeatureProjection, Transformer, nn.ModuleList, nn.ModuleList]:
     if cfg.extractor_mode not in {"group_norm", "layer_norm"}:
         raise ValueError(cfg.extractor_mode)
