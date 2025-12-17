@@ -55,7 +55,7 @@ class SpidRWithReset(SpidR):
         super().__init__(cfg)
         self.adapt_heads = cfg.adapt_heads
 
-    def set_task_internal(self, task_interval: int) -> None:
+    def set_task_interval(self, task_interval: int) -> None:
         self.task_interval = task_interval
 
     def should_reset(self, step: int) -> bool:
