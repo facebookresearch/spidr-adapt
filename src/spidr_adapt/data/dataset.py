@@ -240,22 +240,22 @@ class DistributedBatchSampler(DistributedSampler):
                 padding_size = self.num_replicas - len(indices) % self.num_replicas
                 indices += indices[:padding_size]
                 total_size = len(indices)
-            num_samples = total_size // self.num_replicas
+            num_frames = total_size // self.num_replicas
             subset = indices[self.rank : total_size : self.num_replicas]
-            if len(subset) != num_samples:
-                exception = f"Rank {self.rank} has subset of length {len(subset)} but expected {num_samples}"
+            if len(subset) != num_frames:
+                exception = f"Rank {self.rank} has subset of length {len(subset)} but expected {num_frames}"
                 raise ValueError(exception)
             subsets += subset
 
-        self.num_samples = len(subsets)
+        self.num_frames = len(subsets)
         g = torch.Generator().manual_seed(self.seed + self.epoch + self.metalearning_rank)
         if len(self.batch_samplers) > 1 and self.shuffle:  # Now shuffle across samplers
-            subsets = [subsets[i] for i in torch.randperm(self.num_samples, generator=g).tolist()]
+            subsets = [subsets[i] for i in torch.randperm(self.num_frames, generator=g).tolist()]
         self.subset = subsets
         return iter(self.subset)
 
     def __len__(self) -> int:
-        return self.num_samples
+        return self.num_frames
 
 
 class SpeechDataset(Dataset, abc.ABC):
@@ -329,7 +329,7 @@ def speech_dataset(
 ) -> SpeechDataset:
     with Path(manifest_path).open("r", encoding="utf-8") as f:
         columns = set(f.readline().strip().split(","))
-    if {"fileid", "path", "num_samples", "archive", "byte_offset", "byte_size"}.issubset(columns):
+    if {"fileid", "path", "num_frames", "archive", "byte_offset", "byte_size"}.issubset(columns):
         return SpeechDatasetFromArchive(manifest_path, normalize=normalize, alignments_path=alignments_path)
     return SpeechDatasetFromFiles(
         manifest_path,
@@ -376,18 +376,18 @@ class SpeechCollatorWithMasking:
         self.rand_crop = rand_crop
         self.collate_phonemes = collate_phonemes
 
-    def process_phoneme_tokens(self, tokens: Tensor, frame_offset: int, num_samples: int) -> Tensor:
+    def process_phoneme_tokens(self, tokens: Tensor, frame_offset: int, num_frames: int) -> Tensor:
         model_downsampling = functools.reduce(lambda x, y: x * y, [layer[2] for layer in self.conv_layer_config])
         model_freq = SAMPLE_RATE // model_downsampling  # in Hz
         alignment_downsampling = SAMPLE_RATE // ALIGNMENT_FREQ
 
         phoneme_frame_offset = frame_offset // alignment_downsampling
-        phoneme_num_samples = num_samples // alignment_downsampling
-        tokens = tokens[phoneme_frame_offset : phoneme_frame_offset + phoneme_num_samples]
+        phoneme_num_frames = num_frames // alignment_downsampling
+        tokens = tokens[phoneme_frame_offset : phoneme_frame_offset + phoneme_num_frames]
 
         subsample = ALIGNMENT_FREQ // model_freq
         subsampled = tokens[::subsample]
-        output_length = conv_length(self.conv_layer_config, num_samples)
+        output_length = conv_length(self.conv_layer_config, num_frames)
         if len(subsampled) == output_length:
             return subsampled
         if len(subsampled) == output_length + 1:

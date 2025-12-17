@@ -6,12 +6,12 @@ from pathlib import Path
 
 import torch
 
-PHONEME_DICT_PATH = (
-    "/datasets/metaspeechssl/shared/assets/phoneme_dictionary/supervised_phoneme_dictionaries_vp19_train.json"
-)
+
+PHONEME_DICT_PATH = Path(__file__).parent / 'phoneme_dictionaries_vp19_train.json'
 
 
 class Tokenizer:
+
     def __init__(self, language: str, with_blank: bool = False) -> None:  # noqa: FBT001, FBT002
         with Path.open(PHONEME_DICT_PATH) as file:
             self.phoneme_dict = json.load(file)
