@@ -126,7 +126,7 @@ def meta_train(cfg: Config) -> None:  # noqa: C901, PLR0912, PLR0914, PLR0915
         dtype = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}[cfg.optimizer.dtype]
         model = build_model(cfg=cfg.model, model_type=cfg.run.model_type, checkpoint=cfg.run.init_ckpt)
         model = model.to(device).train()
-        model.set_task_internal(getattr(cfg.meta_update, "task_interval", None))
+        model.set_task_interval(getattr(cfg.meta_update, "task_interval", None))
         optimizer, scaler, scheduler = build_optimizer(
             model,
             cfg.optimizer,
