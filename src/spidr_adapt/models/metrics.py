@@ -9,13 +9,11 @@ from pathlib import Path
 from typing import NamedTuple
 
 import torch
-import torch.compiler
 from torch import Tensor
 from torch import distributed as dist
 
 
 @torch.no_grad()
-@torch.compiler.disable
 def perplexity(y: Tensor, *, tokenwise: bool = False) -> Tensor:
     if tokenwise:
         y = torch.exp2((-y * (y + 1e-8).log2()).sum(-1))

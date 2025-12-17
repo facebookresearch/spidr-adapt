@@ -5,7 +5,6 @@ ssl.lang_task_chunk_duration = 36000
 
 [run]
 model_type = "spidr_reset"
-compile = false
 save_interval = 10000
 keep_latest = 2
 workdir = "/path/to/workdir"

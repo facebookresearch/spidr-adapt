@@ -4,7 +4,6 @@ wandb_mode = "offline"
 wandb_project = "spidr_adapt_codebase"
 wandb_name = "spidr_supervised_test"
 model_type = "spidr"
-compile = false  # compile is not working for me for some reason :/
 
 [data]
 ssl.manifest = "/datasets/metaspeechssl/mahiluthra/split_vad_audio_vp20/vox19_train.csv"
