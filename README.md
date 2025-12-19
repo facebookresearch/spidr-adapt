@@ -64,7 +64,7 @@ See [XX] for detailed instructions.
 ### 2. Pretraining
 
 - Create a TOML config file for pretraining (see `src/spidr/config.py` for available fields).
-- Start from `configs/example.toml` (specifies required fields).
+- Start from `configs/multitask_pt_ssl.toml` or `configs/multitask_pt_sl.toml` (specifies required fields).
 
 You will obtain two meta-initializations:
 - [`Multi-Task-PT[SSL]`](https://dl.fbaipublicfiles.com/shared/devai/assets/models/): Standard multi-task pretraining (self-supervised loss).

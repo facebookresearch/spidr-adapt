@@ -1,6 +1,7 @@
 # Copyright (c) 2025 Meta Platforms, Inc. and affiliates.
 """Model loading utilities."""
 
+import collections
 import json
 import logging
 import typing as tp
