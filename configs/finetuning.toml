@@ -1,0 +1,30 @@
+[data]
+ssl.manifest = "/path/to/manifests/ssl/.csv"
+
+[run]
+model_type = "spidr_reset"
+save_interval = 400
+workdir = "/path/to/workdir"
+wandb_mode = "offline"
+wandb_project = "spidr_adapt_finetuning_test"
+wandb_name = "FT_english_10min_test"
+init_ckpt = "/path/to/ssl+sl/initialization/checkpoint.pt"
+
+[model]
+freeze_step = 0
+ema_start_decay = 1.0
+codebook_decay = 0.8
+
+[optimizer]
+lr = 5e-6
+scheduler = "constant"
+max_steps = 8_000
+warmup_steps = 600
+hold_steps = 9_400
+decay_steps = 10_000
+
+[meta_update]
+task_interval = 20_001
+
+[validation]
+dev.manifest = "/path/to/manifests/.csv"
