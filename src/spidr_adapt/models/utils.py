@@ -39,7 +39,7 @@ def model_from_raw_checkpoint(
             cfg = config_class()
 
     instance = model_class(cfg)
-    state_dict = torch.load(path, map_location="cpu", weights_only=True)
+    state_dict = torch.load(path, map_location="cpu", weights_only=False)
     if "model" in state_dict:
         state_dict = state_dict["model"]
     consume_prefix_in_state_dict_if_present(state_dict, "module.")
