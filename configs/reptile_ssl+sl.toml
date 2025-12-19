@@ -32,6 +32,3 @@ task_interval = 2000
 method = "reptile"
 beta = 0.1
 inner_step = 2000
-
-[validation]
-english.manifest = "/path/to/manifests/.csv"

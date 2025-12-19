@@ -39,6 +39,3 @@ task_interval = 2000
 method = "foblo"
 beta = 0.01
 inner_step = 1800
-
-[validation]
-english.manifest = "/path/to/manifests/.csv"
