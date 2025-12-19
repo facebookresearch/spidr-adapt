@@ -8,7 +8,7 @@
 This repository contains research code and checkpoints for **SpidR-Adapt**.
 
 <p align="center">
-  <img width="80%" src="spidr-adapt-pipeline.pdf" alt="SpidR-Adapt Overview">
+  <img width="50%" src=".github/spidr-adapt.png" alt="SpidR-Adapt Overview">
 </p>
 
 ## Overview
@@ -16,7 +16,7 @@ This repository contains research code and checkpoints for **SpidR-Adapt**.
 SpidR-Adapt enables rapid adaptation to new languages using minimal unlabeled data. The pipeline consists of three main phases:
 
 1. **Meta-Init Stage**: Multi-task pre-training with interleaved supervision, learning a robust meta-initialization $\mathbf{\phi}_0$ from a mixture of known domains.
-2. **Meta-Training (MAdaPT-FOBLO)**: Further optimizes initialization across multiple domains $\mathcal{D}_{\ell}$. Each worker performs inner-loop adaptation with active forgetting (AF) on raw, unlabeled data, followed by outer-loop updates that refine $\mathbf{\phi}$ by minimizing expected task loss on labeled data. This bi-level optimization yields a meta-learner optimized for rapid adaptation.
+2. **Meta-Training (MAdaPT-FOBLO)**: Further optimizes initialization across multiple domains. Each worker performs inner-loop adaptation with active forgetting (AF) on raw, unlabeled data, followed by outer-loop updates that refine $\mathbf{\phi}$ by minimizing expected task loss on labeled data. This bi-level optimization yields a meta-learner optimized for rapid adaptation.
 3. **Meta-Test**: The learned $\mathbf{\phi}^*$ quickly adapts to a new, unseen domain using only its raw data. Each domain corresponds to a single language.
 
 SpidR-Adapt achieves rapid gains in phonemic discriminability (ABX) and spoken language modeling (sWUGGY, sBLIMP, tSC), outperforming in-domain language models after training on less than 1 hour of target-language audio—over **100× more data-efficient** than standard training.
@@ -103,13 +103,12 @@ python -m spidr_adapt --help
 
 | Method                      | Avg ABX Score w/o 0h (↓) | Checkpoints |
 |-----------------------------|--------------------------|-------------|
-| In-Domain Mono-Task-PT      | 4.10                     | link        |
-| Multi-Task-PT [SSL]         | 4.33                     | link        |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+MAdaPT-Reptile             | 4.19                     | link        |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+MAdaPT-FOBLO               | 4.01                     | [link](https://dl.fbaipublicfiles.com/) |
-| Multi-Task-PT [SSL/SL]      | 3.88                     | link        |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+MAdaPT-Reptile             | **3.76**                 | link        |
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+MAdaPT-FOBLO               | _3.80_                   | link        |
+| Multi-Task-PT [SSL]         | 4.33                     | [link](https://dl.fbaipublicfiles.com/shared/devai/assets/spidr-adapt/checkpoints/spidr_vp19lang/step_400000.pt)        |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+MAdaPT-Reptile             | 4.19                     | [link](https://dl.fbaipublicfiles.com/shared/devai/assets/spidr-adapt/checkpoints/spidr_reptile_vp19lang/step_200000.pt)       |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+MAdaPT-FOBLO               | 4.01                     | [link](https://dl.fbaipublicfiles.com/shared/devai/assets/spidr-adapt/checkpoints/spidr_foblo_vp19lang/step_200000.pt) |
+| Multi-Task-PT [SSL/SL]      | 3.88                     | [link](https://dl.fbaipublicfiles.com/shared/devai/assets/spidr-adapt/checkpoints/spidr_sl_vp19lang/step_400000.pt)        |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+MAdaPT-Reptile             | **3.76**                 | [link](https://dl.fbaipublicfiles.com/shared/devai/assets/spidr-adapt/checkpoints/spidr_reptile_sl_vp19lang/step_200000.pt)       |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+MAdaPT-FOBLO               | <u>3.80</u>                    | [link](https://dl.fbaipublicfiles.com/shared/devai/assets/spidr-adapt/checkpoints/spidr_foblo_sl_vp19lang/step_200000.pt)        |
 
 ### 4. Fast Adaptive Fine-Tuning
 
