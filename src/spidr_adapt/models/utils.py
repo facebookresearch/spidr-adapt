@@ -76,7 +76,7 @@ def build_model(
 def spidr_adapt_base(*, pretrained: bool = True, check_hash: bool = False, progress: bool = True) -> SpidRWithReset:
     model = SpidRWithReset(SpidRWithResetConfig())
     if pretrained:
-        url = ""  # TODO: add path
+        url = "https://dl.fbaipublicfiles.com/shared/devai/assets/spidr-adapt/checkpoints/spidr_foblo_sl_vp19lang/step_200000.pt"
         checkpoint = load_state_dict_from_url(url, check_hash=check_hash, progress=progress, map_location="cpu")
         model.load_state_dict(checkpoint["model"])
     model.eval()

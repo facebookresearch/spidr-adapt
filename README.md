@@ -59,7 +59,7 @@ conda install ffmpeg=7.0.0 -c conda-forge
 
 ### 1. Data Preparation
 
-See [XX] for detailed instructions.
+See [these instructions](https://github.com/facebookresearch/spidr-adapt/tree/main/datasets) for dataset preperation.
 
 ### 2. Pretraining
 
