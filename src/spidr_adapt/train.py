@@ -94,6 +94,8 @@ def train(cfg: Config) -> None:  # noqa: PLR0914, PLR0915, C901
         dtype = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}[cfg.optimizer.dtype]
         model = build_model(cfg=cfg.model, model_type=cfg.run.model_type, checkpoint=cfg.run.init_ckpt)
         model = model.to(device).train()
+        if cfg.run.model_type == "spidr_reset":
+            model.set_task_interval(getattr(cfg.meta_update, "task_interval", None))
         optimizer, scaler, scheduler = build_optimizer(model, cfg.optimizer)
         dist.barrier(device_ids=[device.index])
         ckpt = Checkpointer(cfg.run.dir, cfg.run.save_interval, cfg.run.keep_latest)
