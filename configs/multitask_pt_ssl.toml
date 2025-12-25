@@ -1,0 +1,9 @@
+[run]
+workdir = "/path/to/workdir"
+wandb_mode = "offline"
+wandb_project = "spidr"
+wandb_name = "spidr-multi-task-pt"
+model_type = "spidr"
+
+[data]
+manifest = "/path/to/manifests/ssl/.csv"

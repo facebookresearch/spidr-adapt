@@ -1,0 +1,16 @@
+[run]
+workdir = "/path/to/workdir"
+wandb_mode = "offline"
+wandb_project = "spidr"
+wandb_name = "spidr-multi-task-pt-ssl+sl"
+model_type = "spidr"
+
+[data]
+ssl.manifest = "/path/to/manifests/ssl/.csv"
+supervised.manifest = "/path/to/manifests/sl/.csv"
+supervised.alignments_path = "/path/to/alignment/sl/.csv"
+supervised.by_lang = true
+supervised.random_seed = 100
+
+[model]
+supervised_languages = ['sk', 'sl', 'nl', 'lt', 'sv', 'it', 'mt', 'pt', 'hu', 'et', 'hr', 'es', 'el', 'ro', 'bg', 'lv', 'fi', 'pl', 'cs']
