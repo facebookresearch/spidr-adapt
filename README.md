@@ -1,11 +1,11 @@
 # SpidR-Adapt: A Universal Speech Representation Model for Few-Shot Adaptation
 
 <a href="https://pytorch.org/get-started/locally/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white"></a>
-<a href="https://arxiv.org/"><img alt="ArXiv Paper" src="https://img.shields.io/badge/ArXiv-Paper-blue"></a>
+<a href="https://arxiv.org/abs/2512.21204"><img alt="ArXiv Paper" src="https://img.shields.io/badge/ArXiv-Paper-blue"></a>
 
 ---
 
-This repository contains research code and checkpoints for **SpidR-Adapt**.
+This repository contains research code and checkpoints for [**SpidR-Adapt**](https://arxiv.org/abs/2512.21204).
 
 <p align="center">
   <img width="50%" src=".github/spidr-adapt.png" alt="SpidR-Adapt Overview">
