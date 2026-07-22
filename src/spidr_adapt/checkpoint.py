@@ -22,7 +22,7 @@ def remove_param_group(optim: Optimizer, index: int) -> None:
     for param in optim.param_groups[index]["params"]:
         if param in optim.state:
             del optim.state[param]
-    del optim.param_groups[index]
+    optim.param_groups[index]['param'] = []
 
 
 def find_checkpoints(folder: Path) -> list[Path]:
